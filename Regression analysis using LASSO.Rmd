@@ -1,5 +1,5 @@
 ---
-title: "Fseha regression analysis"
+title: "Regression analysis"
 author: "Berhe"
 date: "2022-12-10"
 output:
