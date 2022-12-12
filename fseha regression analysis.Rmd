@@ -1,0 +1,324 @@
+---
+title: "Fseha regression analysis"
+author: "Berhe"
+date: "2022-12-10"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      error = TRUE)
+
+```
+
+
+```{r load the required packages}
+# load required packages
+#Load in our packages - note the new packages we have added, emphasised by a blank line above and below them
+pacman::p_load(
+  rio,            # for importing data
+  here,           # for relative file paths
+  janitor,        # for cleaning data and simple tables
+  skimr,          # inspecting the data
+  lubridate,      # handling dates and times
+  corrr,          # explore correlations
+  gtsummary,      # easy publication-ready tables and regression
+  skimr,          # quick breakdown of dataframes
+
+  caret,          # for variable selection and carrying out statistical modelling and machine learning
+  glmnet,         # needed to carry out variable selection
+  lme4,           # for multivariable regression with random effects
+  broom,          # for cleanly displaying multivariable regression results
+  broom.mixed,    # also for cleanly displaying multivariable regression results
+  tidyr,          # for cleaning results
+  stringr,        # for pattern matching in trings
+
+  tidyverse       # general data management and visualization
+)
+
+```
+
+
+```{r import clean data}
+
+data_clean<-import("data_clean.rds")
+
+data_clean<-data_clean %>% 
+  mutate(household_income=case_when(household_income=="0-4999"~"0-4999",
+                                    household_income=="5000-9999"~"5000-9999",
+                                    household_income=="10000-19999"~">= 20000",
+                                    household_income=="20000-59,9000"~">= 20000",
+                                    household_income==">60000"~">= 20000",
+                                    TRUE~NA_character_)) %>%  
+  mutate(household_income=fct_relevel(household_income,
+                            "0-4999","5000-9999",">=20000")) %>% 
+  mutate(age=case_when(age_in_years<18~"<18",
+                                       age_in_years>=18 & age_in_years<23~"18-22",
+                                       age_in_years>=23~"23+",
+                                       TRUE~NA_character_)) %>% 
+  
+  mutate(delivery_choice_estimated_distance=case_when(delivery_choice_estimated_distance=="below 2 km"~"< 2 km",
+                                            delivery_choice_estimated_distance=="2-5 km"~"2-5 km",
+                                            delivery_choice_estimated_distance=="5-10 km"~">=5 km",
+                                            delivery_choice_estimated_distance==">10 km"~">=5 km")) %>% 
+mutate(listen_radio_programme=factor(listen_radio_programme,
+                    levels = c("No",
+                               "Yes",
+                               NA_character_))) %>% 
+mutate(watch_television=factor(watch_television,
+                    levels = c("No",
+                               "Yes",
+                               NA_character_))) %>% 
+mutate(ANC_during_last_pregnancy=factor(ANC_during_last_pregnancy,
+                    levels = c("No",
+                               "Yes",
+                               NA_character_))) %>% 
+mutate(residency_status=fct_relevel(residency_status, "rural","urban","unknown")) %>% 
+mutate(attended_school=fct_relevel(attended_school, "No","Yes","unknown")) %>% 
+mutate(ANC_time_to_first_visit=fct_relevel(ANC_time_to_first_visit,"months","weeks","unknown")) %>% 
+mutate(Number_of_ANC_visits=fct_relevel(Number_of_ANC_visits,"1 visit",
+                                        "2 visits", "3 visits","4+ visits", "unknown")) %>% 
+mutate(time_travel_anc_visit=fct_relevel(time_travel_anc_visit,"0-30 minute","30-60 minute","60 plus minute")) %>% 
+ mutate(delivery_choice_last_delivery =fct_relevel(delivery_choice_last_delivery, "health facility","home")) %>% 
+  mutate(delivery_choice_traditional_medication=fct_relevel(delivery_choice_traditional_medication,"Yes","No")) %>% 
+  mutate(delivery_choice_husband_choice=fct_relevel(delivery_choice_husband_choice,"home","health facility")) %>% 
+  mutate(delivery_choice_estimated_distance=fct_relevel(delivery_choice_estimated_distance,"< 2 km","2-5 km",">= 2 km")) %>% 
+  mutate(delivery_choice_time_taken=fct_relevel(
+    delivery_choice_time_taken,"less than an hour","1-2 hours")) %>% 
+  mutate(obstetrical_total_number_of_births=fct_relevel(obstetrical_total_number_of_births,"1","2-5",">5")) %>% 
+  mutate(obstetrical_benfit_information=fct_relevel(obstetrical_benfit_information,"no","yes"))       
+
+
+```
+
+# Regression analysis
+variables selected for the regression model 
+
+```{r regression methods}
+regression_data<-data_clean %>% 
+  select(#age, 
+         #age_group_1st_px,
+         household_income,
+         residency_status, 
+         #marital_status,
+         #respondent_religion,
+         #respondent_occupation="occupation",
+         attended_school,
+         husband_education_level,
+         #highest_educ_level_reached,
+         husband_education_level,
+         
+         #husband_occupation,
+         listen_radio_programme,
+         watch_television,
+# Antenatal care visit 
+         ANC_during_last_pregnancy,
+         ANC_time_to_first_visit,
+         main_reason_for_attending_first_anc,
+         #Number_of_ANC_visits,
+         # ANC_means_of_transport_used,
+         #time_to_travel_for_anc="time_travel_anc_visit",
+        
+# place of delivery for last delivery
+         #place_of_delivery_last_baby="where_deliver_last_baby",
+         #who_decided_last_delivery_place="delivery_decision",
+         #means_of_transport_last_hf_delivery="meansof_transport_to_health_facility",
+         time_taken_to_hf_during_last_delivery="distance_covered_tohealth_facility",
+         services_satisfication_health_fcaility,
+         #politely_treatment,
+# choice for the last delivery
+         delivery_choice_last_delivery,
+         traditional_mediication_last_delivery="delivery_choice_traditional_medication",
+         #last_hospital_delivery_assist="delivery_choice_assist_delivery_hospital",
+         #last_delivery_deciesion_maker="delivery_choice_decision_fordelivery",
+         husband_choice_for_place="delivery_choice_husband_choice",
+         #road_acessible_for_delivery="delivery_choice_transport_accessibility",
+         delivery_choice_estimated_distance,
+         #transport_means_to_nearest_health_facility="delivery_choice_transport_means",
+         time_to_reach_health_facaility_for_delivery="delivery_choice_time_taken",
+         obstetrical_total_number_of_births,
+         #obstetrical_age_at_first_pregnancy,
+         obstetrical_benfit_information,
+         #obstetrical_if_yes_how_many_visits_you_have_for_antenatal,
+         overall_choice
+          ) %>% 
+     drop_na()
+
+# check for contrast 
+ #lapply(dataframe.df[c("x1", "x2", "x3")], unique)
+
+```
+
+
+## lets create cross tab for the variables to check the cell values before passing in to regression
+
+
+```{r cross tab}
+
+regression_data %>%
+tbl_summary(by=overall_choice)
+
+ 
+```
+
+
+
+# Fit regression
+
+ -LASSO regression fitting method was used as demonstrated below. it is the latest method of fitting logistic regression method as the stepwise method was found to have biases difficult to avaoid 
+
+```{r then we create the test and train data set }
+
+#This sets up fitting control
+
+fitControl <- trainControl(
+  method = "repeatedcv", 
+  number = 5,         
+  repeats = 10)   
+
+#This runs the lasso regression
+lasso_fit <- train(form = overall_choice ~ . ,
+                   data = regression_data,    #This is the dataset that we created earlier
+                   method = "glmnet",        #This is the name of the method that uses lasso regression
+                   trControl = fitControl)   #This contains the fitting control arguments specified earlier
+
+#Here we extract the predictor variables
+lasso_predictors_raw <- predictors(lasso_fit)
+
+#We can use the stringr function str_extract to clean the variable names
+lasso_predictors_clean <- str_extract(string = lasso_predictors_raw,       #This extracts the important predictors from the Lasso fit
+                                      pattern = paste(colnames(regression_data),   #This converts the column names into a REGEX expression, which allows us to extract all of these patterns from the predictors
+                                                      collapse = "|"))
+
+```
+
+# Fit the multivariable qregression
+
+In addition to the predictor variables selected using the LASSO predictors, if there are other variables that are known to be predictors by prior knowledge, add them in the final model manualy.
+
+Hence, the below variables are added to the model in addition to the lasso predictors and one of the variables selected by the LASSO methods. Also the variables that are select by the LASSO and inflate the model prediction values are removed manualy. 
+
+```{r fit multivariable refression}
+
+# Multivariable regression ------------------------------------------------
+
+#Now we have some variable suggestions, we can carry out our multivariable regression
+#remember that the results of the lasso variable selection are NOT the only things you should include, add in other variables you think are important based on expert knowledge or important to your setting!
+multivariable_regression_table <- regression_data %>%
+  select(lasso_predictors_clean,
+         -husband_choice_for_place,
+         ANC_during_last_pregnancy,
+         #ANC_time_to_first_visit,
+         main_reason_for_attending_first_anc,
+         #household_income,
+         residency_status,
+         #attended_school,
+         husband_education_level,
+         husband_education_level,
+         obstetrical_total_number_of_births,
+          overall_choice) %>% #Remember to include the outcome and any other variables not found in lasso_predictors_clean that you think are important!
+  glm(formula = overall_choice ~.,                  #This formula structure uses all variables found in the dataset to explain outcome
+      family = binomial) %>%                 #We are carrying out a logistic multivariable regression, so we want to use a binomial distribution (family)
+  tbl_regression(exponentiate = TRUE) %>%    #As this is a logistic regression, we want the log odds and so we exponentiate
+  add_nevent() %>% 
+  bold_p()                                   #This highlights significant values
+  
+```
+
+# Univariate regression 
+
+add the the factors known by previous knowldege in addition to the LASSO predictor variables
+
+```{r univariate regression analysis}
+#We are now carrying out a uni-variate regression with the values used in the multivariable regression to compare them
+univariate_regression_table <- regression_data %>%
+  select(lasso_predictors_clean,
+         -husband_choice_for_place,
+         ANC_during_last_pregnancy,
+         #ANC_time_to_first_visit,
+         main_reason_for_attending_first_anc,
+         #household_income,
+         residency_status,
+         #attended_school,
+         husband_education_level,
+         husband_education_level,
+         obstetrical_total_number_of_births,
+          overall_choice) %>%                         # select the previously defined variables
+  tbl_uvregression(                                   # produce univariate table
+    method = glm,                                     # define regression want to run (generalised linear model)
+    y = overall_choice,                                      # define outcome variable
+    method.args = list(family = binomial),            # define what type of glm want to run (logistic)
+    exponentiate = TRUE                               # exponentiate to produce odds ratios (rather than log odds)
+  ) %>%
+  bold_p()
+```
+
+# Combine multivariate and univariate tables 
+
+```{r merge the tables}
+
+#Combine the tables
+tbl_merge(tbls = list(univariate_regression_table, multivariable_regression_table),
+          tab_spanner = c("Univariate", "Multivariable")) #This provides custom titles for the two regressions
+```
+
+# Forest plot 
+
+```{r plot the forest plot}
+multivariable_tidy <- multivariable_regression_table$model_obj %>% #To access the underlying data of the gtsummary object we can use $model_obj, this is what we need to generate our plot
+  broom::tidy(exponentiate = TRUE, conf.int = TRUE)  ## get a tidy dataframe of estimates
+
+#Now we produce our forest plot
+multivariable_tidy %>%
+  subset(term != "(Intercept)") %>%    #We are removing the intercept from our plot as we are not interested in this
+  ggplot(aes(x = estimate,             #This is our central estimate of the variable
+             y = term,                 #This is the name of our variable
+             xmin = conf.low,          #The minimum of our 95% confidence interval
+             xmax = conf.high)) +         #The maximum of our 95% confidence interval
+  geom_point() +                       #Plot a point at y
+  geom_errorbar() +                    #Plot our errorbars at xmin and xmax
+  geom_vline(xintercept = 1, linetype = "dashed") + #Extra step to add in a dashed line
+  theme_bw() + #Extra steps for customising the output
+  labs(x = "Estimate",
+       y = "Term",
+       title = "Odds ratio estimates") #Extra step to clean up the labels
+
+
+
+# alternative
+
+
+pacman::p_load("finalfit")
+data(regression_data)
+explanatory = c("time_taken_to_hf_during_last_delivery" , 
+                "delivery_choice_last_delivery",              
+                "delivery_choice_estimated_distance" ,        
+                "time_to_reach_health_facaility_for_delivery", 
+                "obstetrical_benfit_information",
+                 "ANC_during_last_pregnancy",
+                 #ANC_time_to_first_visit,
+                 "main_reason_for_attending_first_anc",
+                 #household_income,
+                 "residency_status",
+                 #attended_school,
+                 "husband_education_level",
+                 " husband_education_level",
+                 "obstetrical_total_number_of_births" )
+dependent = "overall_choice"
+
+# Plot the the multivariate regression 
+regression_data %>%
+  or_plot(dependent, explanatory,
+       table_text_size=2.2,
+       title_text_size=5,
+       plot_opts=list(xlab("OR, 95% CI"), 
+       theme(axis.title = element_text(size=8))))
+
+```
+
+
