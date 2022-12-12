@@ -1,5 +1,5 @@
 ---
-title: "Regression analysis"
+title: "Regression analysis uisng stepwise fitting method"
 output:
   word_document: default
   html_document: default
