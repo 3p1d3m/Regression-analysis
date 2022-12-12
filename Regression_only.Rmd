@@ -1,0 +1,1721 @@
+---
+title: "Regression analysis"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup,include=FALSE,  results='hide', message=FALSE, warning=FALSE}
+## hide all code chunks in the output, but show errors
+knitr::opts_chunk$set(echo = FALSE,       # hide all code chunks in output
+                      error = TRUE,       # show errors if they appear, but don't stop
+                      fig.width = 6*1.25, # Figure width
+                      fig.height = 6,      # Figure height
+                      warning = FALSE,
+                      message = FALSE
+                     )
+## set default NA to - in output, define figure width/height
+options(knitr.kable.NA = "-")
+
+## Installing required packages for this template
+required_packages <- c("knitr",       # create output docs
+                       "here",        # find your files
+                       "janitor",
+                       "dplyr",       # clean/shape data
+                       "forcats",     # clean/shape data
+                       "stringr",     # clean text
+                       "rio",         # read in data
+                       "ggplot2",     # create plots and charts
+                       "patchwork",   # combine plots in one
+                       "linelist",    # Functions for cleaning/standardising data/dates
+                       "matchmaker",  # dictionary-based standardization of variables
+                       "incidence",   # create epicurves
+                       "aweek",       # define epi weeks
+                       "epitrix",     # epi helpers and tricks
+                       "sf",          # encode spatial vector data
+                       "ggspatial",   # plot maps
+                       "mondate",
+                       "xts",         # moving \naverages
+                       "zoo",         # moving \naverages
+                       "classInt",    # specifying breaks for maps
+                       "excel.link",  # opening password protected files
+                       "askpass",     # opening password protected files
+                       "tsibble",     # time series data
+                       "slider",      # time series data
+                       "tidyr",       # long/long adjustments to data
+                       "gt", 
+                       "gtsummary",# make nice tables
+                       "data.table",   # for taking last and first values from data frames
+                       "patchwork",   # combining plots together
+                       "TTR",        # calculate the moving average
+                       "anytime",     # POSIX Date converter
+                       "matrixStats", # standard deviation matrix calculator 
+                       "tmaptools",   # for getting geocoordinates (lon/lat) based on place names
+                       "ISOweek",
+                       "growthrates",
+                       "glue",
+                       "ggplot2",
+                       "scales",
+                       "gridExtra",
+                       "ggpubr",
+                       "grid",
+                       "sandwich",
+                       "rgeos",
+                       "countrycode",
+                       "officer",
+                       "gt",
+                       "webshot",
+                       "english",
+                       "ggthemes",
+                       "purrr",
+                       "readxl",
+                       "readr",
+                       "broom",
+                       "tidyverse",
+                       "lmtest",
+                       "parameters",
+                       "see")
+for (pkg in required_packages) {
+  # install packages if not already present
+  if (!pkg %in% rownames(installed.packages())) {
+    install.packages(pkg)
+  }
+  
+  # load packages to this current session 
+  library(pkg, character.only = TRUE)
+}
+
+
+# Set the left and right censoring for date of consultation. 
+# The right-censoring create also the week value and the folders where to save the outputs
+
+date_min_report <-  as.Date("2020-01-22")
+date_max_report <- as.Date("2021-12-31")
+
+
+palette_Reds4U <- c('#fcae91', '#fb6a4a','#de2d26', '#a50f15', '#969696')
+
+x_date_labels <- "1 months"
+x_date_labels_faceted <- "2 months"
+
+```
+
+
+```{r import functions}
+source(here::here("functions/read_msf_data.R"))
+source(here::here("functions/aaa_get_latest_data.R"))
+source(here::here("functions/aaa_file_name_helpers.R"))
+source(here::here("functions/current_data.R"))
+source(here::here("functions/utils_modelling.R"))
+source(here::here("functions/utils_vis.R"))
+source(here::here("functions/setup.R"))
+```
+
+
+```{r import data set, warning = FALSE, message = FALSE,show_col_types=FALSE}
+## Read in data from work sheet 
+#dta_linelist <- rio::import(current_raw_covid_MSF,
+                            #which="Sheet1") 
+#dta_linelist<-read_excel("Data/msf_covid19_linelist_global_2022-03-02.xlsx")
+
+#df_labels_comcond <- read_csv(here("./Data/labels_comcond.csv")) 
+#dta_dictionary<-read_excel(here("./data.dictionary.xlsx"))
+
+#options(java.parameters = "-Xmx1000m")
+#dta_linelist<-read.xlsx(here("./Data/msf_covid19_linelist_global_2022-03-02.xlsx"))
+
+dta_linelist <- read_csv("C:/Users/berhe.tesfay/MSF/GRP-EPI-COVID-19 - OCA covid19 research initiative/code/Covid Regression/Data/msf_covid19_linelist_global_2022-03-05.csv")
+
+```
+
+
+```{r clean data}
+## add Continent of the countries according to world bank region
+dta_linelist<-dta_linelist %>% 
+  dplyr::mutate(Continent=case_when(country%in%c("AFG","BGD","IND","PAK","MMR") ~"South Asia",
+    country%in%c("ETH","CAF", "BFA","CMR","TCD","COD","GRC","GIN","KEN","MWI","MLI",
+                        "NER","NGA","SDN","SSD","SOM","TZA","UGA")    ~    "Sub Saharan Africa",
+    country%in%c("COL","HTI","HND","MEX","PER","VEN","BRA")  ~ "Latin America & Caribbean",
+    country%in%c("GRC","KGZ","TJK","UKR","BEL","BLR")        ~"Europe & Central Asia",
+    country%in%c("IRQ","JOR","LBN","SYR","TUN","YEM")        ~"Middle East & North Africa",
+         TRUE~country)) 
+dta_linelist<-dta_linelist %>% 
+  mutate(Country=case_when(country=="AFG"~"Afghanistan",
+                           country=="BGD"~"Bangladesh",
+                           country=="IND"~"India",
+                           country=="PAK"~"Pakistan",
+                           country=="ETH"~"Ethiopia",
+                           country=="CAF"~"Central Africa",
+                           country=="BFA"~"Burkina Faso",
+                           country=="CMR"~"Cameron",
+                           country=="TCD"~"Chad",
+                           country=="COD"~"DRC",
+                           country=="GRC"~"Greece",
+                           country=="GIN"~"Guniea",
+                           country=="KEN"~"Kenya",
+                           country=="MWI"~"Malawi",
+                           country=="MLI"~"Mali",
+                           country=="NER"~"Niger",
+                           country=="NGA"~"Nigeria",
+                           country=="SDN"~"Sudan",
+                           country=="SSD"~"South Sudan",
+                           country=="SOM"~"Somalia",
+                           country=="TZA"~"Tanzania",
+                           country=="UGA"~"Uganda",
+                           country=="COL"~"Colombia",
+                           country=="HTI"~"Haiti",
+                           country=="HND"~"Honduras",
+                           country=="MEX"~"Mexico",
+                           country=="PER"~"Peru",
+                           country=="VEN"~"Venezuela",
+                           country=="BRA"~"Brazil",
+                           country=="KGZ"~"Kazagistan",
+                           country=="TJK"~"Tajikistan",
+                           country=="UKR"~"Ukraine",
+                           country=="BEL"~"Belgium",
+                           country=="BLR"~"Belarus",
+                           country=="IRQ"~"Iraq",
+                           country=="JOR"~"Jordan",
+                           country=="LBN"~"Lebanon",
+                           country=="SYR"~"Syria",
+                           country=="TUN"~"Tunisia",
+                           country=="YEM"~"Yemen",
+                           country=="MMR"~"Myanmar"
+                           )) 
+
+ #dta_linelist<-dta_linelist %>% droplevels(!country == 'Tanzania')
+
+```
+
+<!----change the intentional missing based on condition to No------------>
+
+```{r missing values cleaning and managment}
+
+## if pat course_asyp~ yes , then all missing values in signs and sypmtoms should be changed to 'No' instead of missing
+
+dta_linelist<-dta_linelist %>% 
+  mutate(MSF_symptom_fever=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_fever) ~ "No",
+                                     patcourse_asymp=="Yes" & MSF_symptom_fever=="Unknown" ~ "No",
+                                     TRUE ~ MSF_symptom_fever)) %>% 
+mutate(MSF_symptom_cough=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_cough) ~ "No",
+                                   patcourse_asymp=="Yes" & MSF_symptom_cough=="Unknown" ~ "No",
+                                    TRUE ~ MSF_symptom_cough)) %>% 
+mutate(MSF_symptom_breathlessness=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_breathlessness) ~ "No",
+                                            patcourse_asymp=="Yes" & MSF_symptom_breathlessness=="Unknown" ~ "No",
+                                            TRUE ~ MSF_symptom_breathlessness)) %>%
+mutate(MSF_symptom_sorethoat=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_sorethoat) ~ "No",
+                                       patcourse_asymp=="Yes" & MSF_symptom_sorethoat=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_sorethoat)) %>% 
+mutate(MSF_symptom_chills=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_chills) ~ "No",
+                                       patcourse_asymp=="Yes" & MSF_symptom_chills=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_chills)) %>% 
+mutate(MSF_symptom_headache=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_headache=="Unknown") ~ "No",
+                                      patcourse_asymp=="Yes" & MSF_symptom_headache=="Unknown" ~ "No",
+                                      TRUE ~ MSF_symptom_headache)) %>% 
+mutate(MSF_symptom_abdominal_pain=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_abdominal_pain) ~ "No",
+                                            patcourse_asymp=="Yes" & MSF_symptom_abdominal_pain=="Unknown" ~ "No",
+                                            TRUE ~ MSF_symptom_abdominal_pain)) %>% 
+mutate(MSF_symptom_tiredness=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_tiredness) ~ "No",
+                                       patcourse_asymp=="Yes" & MSF_symptom_tiredness=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_tiredness)) %>% 
+mutate(MSF_symptom_aches=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_aches) ~ "No",
+                                   patcourse_asymp=="Yes" & MSF_symptom_aches=="Unknown" ~ "No",
+                                   TRUE ~ MSF_symptom_aches)) %>% 
+mutate(MSF_symptom_nose_congestion=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_nose_congestion) ~ "No",
+                                             patcourse_asymp=="Yes" & MSF_symptom_nose_congestion=="Unknown" ~ "No",
+                                             TRUE ~ MSF_symptom_nose_congestion)) %>% 
+mutate(MSF_symptom_runny_nose=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_runny_nose) ~ "No",
+                                        patcourse_asymp=="Yes" & MSF_symptom_runny_nose=="Unknown" ~ "No",
+                                        TRUE ~ MSF_symptom_runny_nose)) %>% 
+mutate(MSF_symptom_diarrhoea=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_diarrhoea) ~ "No",
+                                       patcourse_asymp=="Yes" & MSF_symptom_diarrhoea=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_diarrhoea)) %>% 
+mutate(MSF_symptom_vomiting=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_vomiting) ~ "No",
+                                      patcourse_asymp=="Yes" & MSF_symptom_vomiting=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_vomiting)) %>% 
+mutate(MSF_symptom_loss_taste=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_loss_taste) ~ "No",
+                                        patcourse_asymp=="Yes" & MSF_symptom_loss_taste=="Unknown" ~ "No",
+                                        TRUE ~ MSF_symptom_loss_taste)) %>% 
+mutate(MSF_symptom_anosmia=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_anosmia) ~ "No",
+                                     patcourse_asymp=="Yes" & MSF_symptom_anosmia=="Unknown" ~ "No",
+                                     TRUE ~ MSF_symptom_anosmia)) %>% 
+mutate(MSF_symptom_chest_pain=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_chest_pain) ~ "No",
+                                        patcourse_asymp=="Yes" & MSF_symptom_chest_pain=="Unknown" ~ "No",
+                                       TRUE ~ MSF_symptom_chest_pain)) %>% 
+mutate(MSF_symptom_cutaneous_signs=case_when(patcourse_asymp=="Yes" & is.na(MSF_symptom_cutaneous_signs) ~ "No",
+                                             patcourse_asymp=="Yes" & MSF_symptom_cutaneous_signs=="Unknown" ~ "No",
+                                           TRUE ~ MSF_symptom_cutaneous_signs)) %>% 
+mutate(MSF_can_spit=case_when(patcourse_asymp=="Yes" & is.na(MSF_can_spit) ~ "No",
+                              patcourse_asymp=="Yes" & MSF_can_spit=="Unknown" ~ "No",
+                              TRUE ~ MSF_can_spit))
+```
+
+
+```{r clean MSF_severity}
+
+## Severity Missing versus patient ventilated or oxygen or ICU yes~ mutate in to Yes
+  dta_linelist<-dta_linelist %>% 
+   mutate(MSF_severity=case_when(is.na(MSF_severity) & MSF_received_oxygen=="Yes"~"Severe",
+                                is.na(MSF_severity) & patcourse_icu=="Yes"~"Criticl",
+                                is.na(MSF_severity) & patcourse_vent=="Yes"~"Critcal",
+                                TRUE~MSF_severity))
+dta_linelist<-dta_linelist %>% 
+  mutate(MSF_severity, MSF_severity = case_when(
+  is.na(MSF_severity) & patcourse_asymp == "Yes" | outcome_patcourse_admit == "No" ~ "Mild",
+  TRUE~MSF_severity
+))
+
+```
+
+
+```{r data cleaning and regrouping}
+data_linelist<-dta_linelist %>% 
+  filter(date_event<=date_max_report) %>% 
+## filter only confirmed cases 
+  filter(ind_MSF_covid_status=="Confirmed") %>% 
+  filter(merge_admit=="Yes") 
+                           
+## categorize cata gorical data Age 
+data_linelist<-data_linelist %>% 
+mutate(`Age Category`=case_when(
+# criteria # new value
+age_in_years<15 ~"0-14 yrs",
+age_in_years>=15 & age_in_years<35 ~"15-34 yrs",
+age_in_years>=35 & age_in_years<50 ~"35-49 yrs",
+age_in_years>=50 & age_in_years<65 ~"50-64 yrs",
+age_in_years>=65 & age_in_years<80 ~"65-79 yrs",
+age_in_years>=80 ~ "80+ yrs",
+is.na(age_in_years) ~NA_character_)) %>%
+mutate(`Age Category`=factor(`Age Category`,
+                             levels=c("0-14 yrs",
+                                      "15-34 yrs",
+                                      "35-49 yrs",
+                                       "50-64 yrs",
+                                       "65-79 yrs",
+                                       "80+ yrs",
+                                       NA_character_))) %>% 
+## age group for Continent wise analysis based on MSF Analysis plan
+mutate(`Age group`=case_when(
+# criteria # new vlue
+age_in_years<2 ~"0-1 yrs",
+age_in_years>=2 & age_in_years <5  ~"2-4 yrs",
+age_in_years>=5 & age_in_years <15 ~"5-14 yrs",
+age_in_years>=15 & age_in_years<30 ~"15-29 yrs",
+age_in_years>=30 & age_in_years<40 ~"30-39 yrs",
+age_in_years>=40 & age_in_years<50 ~"40-49 yrs",
+age_in_years>=50 & age_in_years<60 ~"50-59 yrs",
+age_in_years>=60 & age_in_years<70 ~"60-69 yrs",
+age_in_years>=70 & age_in_years<80 ~"70-79 yrs",
+age_in_years>=80 ~ "80+ yrs",
+is.na(age_in_years) ~ NA_character_)) %>%
+mutate(`Age group`=factor(`Age group`,
+                             levels=c("0-1 yrs",
+                                      "2-4 yrs",
+                                      "5-14 yrs",
+                                      "15-29 yrs",
+                                      "30-39 yrs",
+                                      "40-49 yrs",
+                                      "50-59 yrs",
+                                      "60-69 yrs",
+                                      "70-79 yrs",
+                                      "80+ yrs", 
+                                      NA_character_))) %>% 
+## regroup the age group accoding to the data in mainland china (Literature)
+  mutate(`Age china`=case_when(
+# criteria # new vlue
+age_in_years<10 ~"0-9 yrs",
+age_in_years>=10 & age_in_years <20  ~"10-19 yrs",
+age_in_years>=20 & age_in_years <30 ~"20-29 yrs",
+age_in_years>=30 & age_in_years<40 ~"30-39 yrs",
+age_in_years>=40 & age_in_years<49 ~"40-49 yrs",
+age_in_years>=50 & age_in_years<59 ~"50-59 yrs",
+age_in_years>=60 & age_in_years<69 ~"60-69 yrs",
+age_in_years>=70 & age_in_years<79 ~"70-79 yrs",
+age_in_years>=80 ~ "80+ yrs",
+is.na(age_in_years) ~ NA_character_)) %>%
+mutate(`Age group`=factor(`Age group`,
+                             levels=c("0-9 yrs",
+                                      "10-19 yrs",
+                                      "20-29 yrs",
+                                      "30-39 yrs",
+                                      "40-49 yrs",
+                                      "50-59 yrs",
+                                      "60-69 yrs",
+                                      "70-79 yrs",
+                                      "80+ yrs", 
+                                      NA_character_))) %>% 
+  
+## Mutate age based on the Covid cases in the UK (Litrature)  
+mutate(`Age 7gp`=case_when(
+# criteria # new vlue
+age_in_years<18 ~"0-17 yrs",
+age_in_years>=18 & age_in_years<30 ~"18-29 yrs",
+age_in_years>=30 & age_in_years<40 ~"30-39 yrs",
+age_in_years>=40 & age_in_years<49 ~"40-49 yrs",
+age_in_years>=50 & age_in_years<59 ~"50-59 yrs",
+age_in_years>=60 & age_in_years<69 ~"60-69 yrs",
+age_in_years>=70 & age_in_years<79 ~"70-79 yrs",
+age_in_years>=80 ~ "80+ yrs",
+is.na(age_in_years) ~ NA_character_)) %>%
+mutate(`Age 7gp`=factor(`Age 7gp`,
+                             levels=c("0-17 yrs",
+                                      "18-29 yrs",
+                                      "30-39 yrs",
+                                      "40-49 yrs",
+                                      "50-59 yrs",
+                                      "60-69 yrs",
+                                      "70-79 yrs",
+                                      "80+ yrs", 
+                                      NA_character_))) %>% 
+## sex data clean
+mutate(sex = factor(patinfo_sex, levels = c('F', 'M'), 
+                    labels = c('Female', 'Male')))
+
+```
+
+
+```{r clean hospital treatment data}
+data_linelist<-data_linelist %>% 
+## categorize the duration of illness for confirmed cases 
+mutate(`Length of stay in Hospital`=
+          case_when(
+    # criteria                                   # new value if TRUE
+    MSF_length_stay< 3                                   ~ "<3 days",
+    MSF_length_stay >= 3 & MSF_length_stay < 6           ~ "3-6 days",
+    MSF_length_stay >= 7 & MSF_length_stay < 13          ~ "7-13 days",
+    MSF_length_stay>=14                                  ~"14+ days",
+    is.na(MSF_length_stay)                               ~ NA_character_,
+    )) %>% 
+  
+  mutate(`Length of stay in Hospital`=factor(`Length of stay in Hospital`,
+                                             levels = c("<3 days",
+                                                        "3-6 days",
+                                                        "7-13 days",
+                                                        "14+ days",
+                                                         NA_character_))) %>% 
+#### Age category for pregnanct analysis
+mutate(`Age preg`=case_when(
+## criteria # new value
+age_in_years<19 ~"0-19 years",
+age_in_years>=20 & age_in_years <30  ~"20-29 years",
+age_in_years>=30 & age_in_years <40 ~"30-39 years",
+age_in_years>=40 & age_in_years <49 ~"40-49 years",
+age_in_years>=50 ~ "80+ yrs",
+is.na(MSF_length_stay) ~ NA_character_)) %>%
+mutate(`Age preg`=factor(`Age preg`,
+                             levels=c("0-19 years",
+                                      "20-29 years",
+                                      "30-39 years",
+                                      "40-49 years",
+                                      ">=50 years", 
+                                      NA_character_))) %>% 
+
+## categorize the delay between admission and date of consultation
+  mutate(`Delay between onset and consultation` = as.numeric(MSF_date_consultation - patcourse_dateonset)) %>% 
+  mutate(`Delay between onset and consultation` = case_when(
+    # criteria                                                                        # new value if TRUE
+   `Delay between onset and consultation` <3                                                ~ "<3 days",
+   `Delay between onset and consultation` >=3 & `Delay between onset and consultation` < 6  ~ "3-6 days",
+   `Delay between onset and consultation` >=7 & `Delay between onset and consultation` < 13 ~ "7-13 days",
+   `Delay between onset and consultation`>=14                                                ~"14+ days",
+   is.na(`Delay between onset and consultation`)                                             ~ NA_character_
+    )) %>%
+     mutate(`Delay between onset and consultation`=factor(`Delay between onset and consultation`,
+                                             levels = c("<3 days",
+                                                        "3-6 days",
+                                                        "7-13 days",
+                                                        "14+ days",
+                                                         NA_character_))) %>% 
+  ## Mutate MSF admission
+  mutate(Admitted=merge_admit,
+         `Oxygen therapy`=merge_oxygen,
+         `Ventilation therapy`=merge_vent,
+         `ICU admitted`=merge_icu,
+          Outcome=ind_outcome_patcourse_status) %>% 
+  
+   mutate(Admitted=factor(Admitted,
+                    levels = c("Yes",
+                               "No",
+                               "Unknown",
+                               NA_character_))) %>% 
+    mutate(`Oxygen therapy`=factor(`Oxygen therapy`,
+                    levels = c("No at any time",
+                               "No at admission then not reported",
+                               "Yes",
+                               "Not reported",
+                               NA_character_))) %>% 
+    mutate(`Ventilation therapy`=factor(`Ventilation therapy`,
+                    levels = c("No at any time",
+                               "No at admission then not reported",
+                               "Yes",
+                               "Not reported",
+                                NA_character_))) 
+```
+
+
+```{r clean signs and symptoms}
+
+data_linelist<-data_linelist %>% 
+## Mutate MSF symptoms
+ mutate(  Fever              = MSF_symptom_fever, 
+         `Abdominal pain`    = MSF_symptom_abdominal_pain,
+          Aches              = MSF_symptom_aches,
+          Anosmia            = MSF_symptom_anosmia,
+          Breathlessness     = MSF_symptom_breathlessness,
+         `Chest pain`        = MSF_symptom_chest_pain, 
+          Chills             = MSF_symptom_chills,
+          Cough              = MSF_symptom_cough,
+         `Cutaneous signs`   = MSF_symptom_cutaneous_signs, 
+         `Diarrhoea`         = MSF_symptom_diarrhoea,
+         `Headache`          = MSF_symptom_headache,
+         `Loss of taste`     = MSF_symptom_loss_taste,
+         `Nasal congestion`  = MSF_symptom_nose_congestion,
+         `Runny nose`        = MSF_symptom_runny_nose, 
+         `Sore throat`       = MSF_symptom_sorethoat,
+          Vomiting           = MSF_symptom_vomiting,
+          Tiredness          = MSF_symptom_tiredness,
+          `Can spit`         = MSF_can_spit
+        ) %>% 
+
+## Recode the levels to for the regression to keep them in order 
+## Discussion meed if the Unknown values for the signs and symptoms should be labels as NAs or be treated as "Unknown"  
+mutate(Fever=factor(Fever,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                                 NA_character_))) %>% 
+mutate(`Abdominal pain`=factor(`Abdominal pain`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>%
+  
+mutate(Aches=factor(Aches,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>%
+mutate(Anosmia=factor(Anosmia,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(Breathlessness=factor(Breathlessness,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(`Chest pain`=factor(`Chest pain`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown"))) %>% 
+mutate(Chills=factor(Chills,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(Cough=factor(Cough,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(`Cutaneous signs`=factor(`Cutaneous signs`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown"))) %>% 
+mutate(Diarrhoea=factor(Diarrhoea,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(Headache=factor(Headache,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(`Loss of taste`=factor(`Loss of taste`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+mutate(`Nasal congestion`=factor(`Nasal congestion`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+                               
+mutate(`Runny nose`=factor(`Runny nose`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown"))) %>% 
+mutate(Vomiting=factor(Vomiting,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+
+  mutate(Tiredness=factor(Tiredness,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown"))) %>% 
+  mutate(`Can spit`=factor(`Can spit`,
+                    levels = c("Yes",
+                               "No",
+                               "Unknown",
+                                NA_character_))) %>% 
+  mutate(`Sore throat`=factor(`Sore throat`,
+                    levels = c("Yes",
+                               "No",
+                               "Unknown",
+                                NA_character_)))
+
+```
+
+
+```{r data clean co-morbidities}
+data_linelist<-data_linelist %>% 
+## mutate Co morbid conditions
+  mutate(`Cardiac diseases`            =ind_Comcond_cardi,
+           Hypertension                =ind_MSF_hypertension,
+          `Liver diseases`             =ind_Comcond_liver,
+          `Renal diseases`             =ind_Comcond_renal,
+           Diabetes                    =ind_Comcond_diabetes,
+          `Neurological diseases`      =ind_Comcond_neuro,
+           Malignancy                  =ind_Comcond_malig,
+           Malaria                     =MSF_malaria,
+           HIV                         =MSF_hiv_status,
+          `Other immune deficiency diseases`   =ind_Comcond_immuno,
+           Tuberculosis                        =MSF_tb_active,
+          `Other chronic lung diseases`        =ind_Comcond_lung,
+          Measles                              =ind_MSF_measles,
+          Pregnancy                            =ind_Comcond_preg,
+          Trimester                            =ind_Comcond_pregt,
+          `Post partum`                        =ind_Comcond_partum) %>% 
+  mutate(`Cardiac diseases`=factor(`Cardiac diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(Hypertension=factor(Hypertension,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Liver diseases`=factor(`Liver diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Renal diseases`=factor(`Renal diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Neurological diseases`=factor(`Neurological diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(Diabetes=factor(Diabetes,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                                NA_character_))) %>% 
+  mutate(Pregnancy=factor(Pregnancy,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  
+  mutate(Malignancy=factor(Malignancy,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(Malaria=factor(Malaria,
+                    levels = c("Negative",
+                               "Inconclusive",
+                               "Positive",
+                               "Not done",
+                               NA_character_))) %>% 
+  mutate(HIV=factor(HIV,
+                    levels = c("Negative",
+                               "Positive (no ARV)",
+                               "Positive (on ARV)",
+                               "Positive (unknown)",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(Measles=factor(Measles,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+   mutate(Tuberculosis=factor(Tuberculosis,
+                    levels = c("No",
+                               "Yes (currently on treatment)",
+                               "Yes (currently no treatment)",
+                               "Yes (unknown)",
+                               "Unknown",
+                               NA_character_))) %>% 
+  
+  
+  mutate(`Other chronic lung diseases`=factor(`Other chronic lung diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>%
+  mutate(`Other immune deficiency diseases`=factor(`Other immune deficiency diseases`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) 
+
+```
+
+
+```{r data clean other risk factors}
+
+data_linelist<-data_linelist %>% 
+## other risk factors 
+              # new value                    # Old value
+      mutate(Obesity=MSF_obesity,
+             Smoking                         =MSF_smoking,
+             Malnutrition                    =MSF_malnutrition,
+             `Health care worker`             =MSF_job,
+             `Travel in the past 14 days`     =expo_travel,
+            `Visited health care facility`   =expo_visit_healthcare,
+            `Visited traditional healer`      =MSF_expo_traditional_healer,
+            `Participated in mass gathering`  =MSF_expo_mass_gathering,
+            `Contact setting`=expo_case_setting_detail,
+            `Contact to case`=expo_contact_case,  
+             HCW=patinfo_occuhcw)%>%
+  
+  mutate(HCW=factor(HCW,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>%
+  
+  mutate(Obesity=factor(Obesity,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(Smoking=factor(Smoking,
+                    levels = c("No",
+                               "Yes (current)",
+                               "Yes (former)",
+                               "Unknown",
+                               NA_character_))) %>%
+  mutate(Malnutrition=factor(Malnutrition,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                                NA_character_))) %>%
+  mutate(`Travel in the past 14 days`=factor(`Travel in the past 14 days`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Visited health care facility`=factor(`Visited health care facility`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Visited traditional healer`=factor(`Visited traditional healer`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Participated in mass gathering`=factor(`Participated in mass gathering`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                               NA_character_))) %>% 
+  mutate(`Contact to case`=factor(`Contact to case`,
+                    levels = c("No",
+                               "Yes",
+                               "Unknown",
+                             NA_character_))) %>% 
+ mutate(pregnancy=case_when(sex=="Male" & `ind_Comcond_preg`=="No" ~"Male",
+                           sex=="Male" & `ind_Comcond_preg`=="Yes" ~"Invalid",
+                           sex=="Male" & `ind_Comcond_preg`== ""   ~"Male",
+                           sex=="Male" & `ind_Comcond_preg`=="No" ~"Male",
+                           sex=="Femal" & `ind_Comcond_preg`=="No" ~"Not pregnant",
+                           sex=="Female" &`ind_Comcond_preg`=="Yes" ~"Pregnant",
+                           is.na(sex)~NA_character_,
+                           sex=="Female" & is.na(`ind_Comcond_preg`) ~NA_character_,
+                           TRUE ~ `ind_Comcond_preg`
+                          ))%>%
+  ## Mutate the severity in to Mild, Severe and Dead
+  mutate(Severity=case_when(MSF_severity=="Moderate" & outcome_patcourse_status=="Sent back home"~ "Mild",
+                            MSF_severity=="Moderate" & outcome_patcourse_status=="Transferred"~ "Severe",
+                            MSF_severity=="Moderate" & outcome_patcourse_status=="Cured"~ "Severe",
+                            MSF_severity=="Moderate" & outcome_patcourse_status=="Dead"~ "Severe",
+                            MSF_severity=="Moderate" & outcome_patcourse_status=="Left against medical advice"~ "Severe",
+                            MSF_severity=="Moderate" & outcome_patcourse_status==""~ NA_character_,
+                            MSF_severity=="Moderate" & outcome_patcourse_status=="Other"~ "Mild",
+                            
+                            MSF_severity=="Critical" & outcome_patcourse_status=="Cured"~ "Severe",
+                            MSF_severity=="Critical" & outcome_patcourse_status=="Left against medical advice"~ "Severe",
+                            MSF_severity=="Critical" & outcome_patcourse_status=="Dead"~ "Dead",
+                            MSF_severity=="Critical" & outcome_patcourse_status=="Left against medical advice"~ "Severe",
+                            MSF_severity=="Critical"&  outcome_patcourse_status=="Other"~"Severe",
+                            
+                            MSF_severity=="Severe" & outcome_patcourse_status=="Cured"~ "Severe",
+                            MSF_severity=="Severe" & outcome_patcourse_status=="Died"~ "Dead",
+                            MSF_severity=="Severe" & outcome_patcourse_status=="Left against medical advice"~ "Severe",
+                            MSF_severity=="Severe" & outcome_patcourse_status=="Sent back home"~ "Severe",
+                            MSF_severity=="Severe" & outcome_patcourse_status=="Transferred"~ "Severe",
+                            
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Left against medical advice"~ "Mild",
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Other"~ "Mild",
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Sent back home"~ "Mild",
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Dead"~ "Dead",
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Transfered"~ "Mild",
+                            MSF_severity=="Mild" & outcome_patcourse_status=="Others"~ "Mild",
+                            
+                            is.na(MSF_severity) & outcome_patcourse_status=="Cured"~ "Severe",
+                            is.na(MSF_severity) & outcome_patcourse_status=="Transferred"~ "Severe",
+                            is.na(MSF_severity) & outcome_patcourse_status=="Left against medical advice"~ "Severe",
+                            is.na(MSF_severity) & outcome_patcourse_status=="Transferred"~ "Severe",
+                            is.na(MSF_severity) & outcome_patcourse_status=="Dead"~ "Dead",
+                            is.na(MSF_severity) & outcome_patcourse_status=="Sent back home"~ "Mild")) %>% 
+mutate(Severity=factor(Severity,
+                       level=c("Mild",
+                               "Severe",
+                               "Dead",
+                               NA_character_))) %>% 
+
+mutate(Occupation=case_when(MSF_job=="Health workers: 1st line (patient contact)"      ~"1st line healthcare worker",
+                           MSF_job=="Health workers: 2nd line (no patient contact)"    ~"2nd line healthcare worker",
+                           MSF_job=="Laboratory technician"                            ~"2nd line healthcare worker",
+                           MSF_job=="Student-University Institute"                     ~"Student/Teacher",
+                           MSF_job=="Teacher"                                          ~"Student/Teacher",
+                           MSF_job=="Prisoner - Detained"                              ~"Prisoner",
+                           MSF_job=="Community Worker"                                 ~"Community Worker" ,
+                           MSF_job=="Riposte Agent: community worker"                  ~"Community Worker or miscellaneous" ,
+                           MSF_job=="Riposte Agent: other"                             ~"Community Worker  or miscellaneous" ,
+                           MSF_job=="Traditional healer"                               ~"Community Worker  or miscellaneous" ,
+                           MSF_job=="Social worker"                                    ~"Community Worker  or miscellaneous" ,
+                           MSF_job=="Retired person"                                   ~"Retired" ,
+                           MSF_job=="Religious"                                        ~"Community Worker or miscellaneous" ,
+                           MSF_job=="Seniour executive"                                ~"Seniour official" ,
+                           MSF_job=="State official"                                   ~"Seniour official" ,
+                           MSF_job=="Employed (Other)"                                 ~"Employed other" ,
+                           MSF_job=="Unemployed-no occupation"                         ~"Unemployed" ,
+                           MSF_job=="Trader-Merchant and employees"                     ~"Trader-Merchant and employees",
+                           is.na(MSF_job)~NA_character_,
+                           TRUE ~"Others")) %>% 
+  mutate(Occupation=factor(Occupation,
+                           level= c("Others",
+                                  "Student/Teacher",
+                                  "1st line healthcare worker",
+                                  "2nd line healthcare worker",
+                                  "Prisoner",
+                                  "Community Worker  or miscellaneous" ,
+                                  "Trader-Merchant and employees",
+                                  "Seniour official" ,
+                                  "Employed other" ,
+                                  "Unemployed" ,
+                                  "Retired" ,
+                                  NA_character_
+  ))) 
+
+# Mutate pregnancy in to Yes,and the Invalid values, unknown and missing to NA
+#data_linelist<-data_linelist %>% 
+  #mutate(Pregnancy=case_when(pregnancy=="Pregnant"~"Yes",
+                             #pregnancy=="No"~"No",
+                             #TRUE~NA_character_)) %>% 
+   #mutate(Pregnancy=factor(pregnancy,
+                    #levels = c("No",
+                               #"Yes",
+                            #NA_character_)))
+ 
+#library(skimr)
+#skim(data_linelist$Pregnancy)
+```
+
+# Missing value explore for inclusin in the regresson analysis
+  Variables with more than 75% missing values will be excluded from the regression analysis
+
+```{r regresion recoding}
+
+## Severity recording for regression analysis
+data_linelist<-data_linelist %>% 
+mutate(Soutcome=case_when(Severity=="Severe" ~ 1, ## severe and dead cases are coded to 1
+                          Severity=="Mild"~0, ## mild cases are coded to 0
+                          Severity=="Dead"~1,
+                          TRUE ~ NA_real_))
+
+## Outcome of of diseases (Died or survived)
+  # code the cured, sent back home as Survived=0,
+  # code the died pateints as Dead=1
+data_linelist<-data_linelist %>% 
+mutate(toutcome=case_when(
+    Outcome=="Cured" ~ 0,
+    Outcome=="Sent back home"~0,
+    Outcome=="Died"~1,
+    TRUE ~ NA_real_))
+    
+data_linelist<-data_linelist %>% 
+  mutate(ssoutcome=case_when(MSF_severity=="Severe"~1,
+                             MSF_Severity=="Critical"~1,
+                             MSF_severity=="Moderate" &  merge_admit == "Yes" ~1,
+                             MSF_severity=="Moderate"& merge_admit=='No'~0,
+                             MSF_severity=="Mild"~0,
+                             TRUE~NA_real_))
+
+data_linelist<-data_linelist %>% 
+  mutate(Soutcome=as.factor(Soutcome),
+         toutcome=as.factor(toutcome))
+
+```
+
+
+```{r further cleaning of data to remove the NA values}
+explanatory_vars<-c("Age group","sex","Delay between onset and consultation","Length of stay in Hospital","Admitted","Continent","ICU admitted","Ventilation therapy","Oxygen therapy","Outcome","Fever", "Abdominal pain", "Aches",  "Anosmia","Breathlessness", "Chest pain",  "Chills",  "Cough",  "Cutaneous signs",   "Diarrhoea",  "Headache",    "Loss of taste",      "Nasal congestion",  "Runny nose",  "`Sore throat`","Vomiting",  "Tiredness", "Cardiac diseases", "Hypertension", "Liver diseases", "Renal diseases", "Diabetes", "Neurological diseases", "Malignancy", "Malaria", "HIV", "Other immuno deficiency diseases","Tuberculosis",
+                    "Other chronic lung diseases","Measles",
+
+          "Obesity","Smoking", "Malnutrition","Occupation", "Travel in the past 14 days",
+          "Visited health care facility", "Visited traditional healer","``Participated in mass gathering``",
+            "Setting of contact with covid-19 case", "Contact to case","merge_admit")
+
+##data_linelist_all_unknown <- data_linelist %>%  
+  ##mutate(across(                                      
+    ##.cols = all_of(c(explanatory_vars)),  ## for each column listed and "outcome"
+    ##.fns = ~case_when(                              
+     ## .%in% c("Yes","yes")   ~ "Yes",           ## recode male, yes and death to 1
+     ## .%in% c("No","no") ~ "No", # female, no and recover to 0
+      ##.%in% c("Unknown","unknown") ~ NA_character_,
+      ## TRUE ~ c(explanatory_vars))                          ## otherwise set to missing
+   ## )
+ ## )
+
+explanatory_vars_comorbid<-c("Cardiac diseases", "Hypertension", "Liver diseases", "Renal diseases", "Diabetes", "Neurological diseases", "Malignancy", "Malaria", "HIV", "Other immune deficiency diseases","Tuberculosis","Length of stay in Hospital", "Delay between onset and consultation","Other chronic lung diseases","Measles","Smoking", "Malnutrition","Pregnancy","HCW")
+
+explanatory_vars_symptom<-c("Fever", "Abdominal pain", "Aches",  "Anosmia","Breathlessness", "Chest pain",  "Chills",  "Cough",   "Diarrhoea",  "Headache",    "Loss of taste",      "Nasal congestion",  "Runny nose",  "Sore throat","Vomiting",  "Tiredness","merge_admit", "Cutaneous signs","Obesity")
+
+
+
+## yy<-data_linelist %>% 
+## select(all_of(
+ ## .cols%in% c(explanatory_vars_symptom) %>% 
+        ## keep == "Yes"))
+
+```
+
+
+```{r clean data for regression}
+
+## Mutate the explanatory variables to change the Unknown values to NA's to fit in regression
+############################################################################################
+
+data_linelist_reg <- data_linelist %>%  
+  mutate(across(                                      
+    .cols = all_of(c(explanatory_vars_symptom)),  ## for each column listed and "outcome"
+    .fns = ~case_when(                             
+      .%in%c("Yes","yes") ~ "Yes",             
+      .%in%c("No","no")   ~ "No",              
+       TRUE ~ NA_character_)                  
+    )
+  )
+
+##########################################################################################
+data_linelist_reg <- data_linelist_reg %>% 
+mutate(across(
+              .cols = all_of(c(explanatory_vars_comorbid)),
+              .fns = ~case_when(
+                .%in% c("Yes","yes")   ~ "Yes",                   
+                 .%in% c("No","no") ~ "No",                        
+                 .%in%c("Negative","negative")~"Negative",
+                 .%in%c("Postive (on ARV)")~"Positive (on ARV)",
+                 .%in%c("Positive (no ARV)")~"Positive (no ARV)",
+                 .%in%c("Positive (unknown)")~"Positive (unknown)",
+                 .%in%c("Inconclusive")~"Inconclusive",
+                 .%in%c("Positive")~"Positive",
+                 .%in%c("Not done")~"Not done",
+                 .%in%c("Yes (currently on treatment)")~"Yes (currently on treatment)",
+                 .%in%c("Yes (currently no treatment)")~"Yes (currently no treatment)",
+                 .%in%c("Yes (unknown)")~"Yes (unknown)",
+                 .%in%c("Yes (current)")~"Yes (current)",
+                 .%in%c("Yes (former)")~"Yes (former)",
+                 .%in%c("<3 days")~"<3 days",
+                 .%in%c("3-6 days")~"3-6 days",
+                 .%in%c("7-13 days")~"7-13 days",
+                 .%in%c("14+ days")~"14+ days",
+                 TRUE ~ NA_character_))) 
+#data_linelist <- linelist %>% 
+  #mutate(across(.cols = c(Fever,Cough,Breathlessnes,..), .fns = as.Factor))
+
+#data_linelist <- linelist %>% 
+  #mutate(across(.cols = everything(), .fns = as.factor))
+  
+data_linelist_reg <- data_linelist_reg %>% 
+mutate(`Age Category`=as.factor(`Age Category`),
+        Fever=as.factor(Fever),
+       Cough=as.factor(Cough),
+       Breathlessness=as.factor(Breathlessness),
+       `Sore throat`=as.factor(`Sore throat`),
+       Chills=as.factor(Chills),
+       Headache=as.factor(Headache),
+       `Abdominal pain`=as.factor(`Abdominal pain`), 
+       Aches=as.factor(Aches),
+       Tiredness=as.factor(Tiredness), 
+       `Nasal congestion`=as.factor(`Nasal congestion`),
+       `Runny nose`=as.factor(`Runny nose`),
+       `Diarrhoea`=as.factor(Diarrhoea),
+       Vomiting=as.factor(Vomiting),
+       `Loss of taste`=as.factor(`Loss of taste`),
+       Anosmia=as.factor(Anosmia),
+       `Chest pain`=as.factor(`Chest pain`),
+       `Cutaneous signs`=as.factor(`Cutaneous signs`),
+       `Cardiac diseases`=as.factor(`Cardiac diseases`),
+       Hypertension=as.factor(Hypertension),
+       `Liver diseases`=as.factor(`Liver diseases`),
+       `Renal diseases`=as.factor(`Renal diseases`),
+       Diabetes=as.factor(Diabetes),
+       `Neurological diseases`=as.factor(`Neurological diseases`),
+       Malignancy=as.factor(Malignancy),
+       Malaria=as.factor(Malaria),
+       HIV=as.factor(HIV),
+       `Other immune deficiency diseases`=as.factor(`Other immune deficiency diseases`),
+       Tuberculosis=as.factor(Tuberculosis),
+       `Other chronic lung diseases`=as.factor(`Other chronic lung diseases`),
+       Measles=as.factor(Measles),
+       Obesity=as.factor(Obesity),
+       Smoking=as.factor(Smoking),
+       Malnutrition=as.factor(Malnutrition),
+       Occupation=as.factor(Occupation),
+       `Delay between onset and consultation`=as.factor(`Delay between onset and consultation`),
+       `Length of stay in Hospital`=as.factor(`Length of stay in Hospital`),
+        merge_admit=as.factor(merge_admit),
+        Pregnancy=as.factor(Pregnancy))
+
+## select only the variables of interest to avoid the factor level error
+## After loading the MASS package ""select" will be confused use "dplyr:: select()" instead
+data_linelist_reg<-data_linelist_reg %>% 
+  dplyr::select(Soutcome,toutcome, sex,`Age group`,`Age china`, `Age 7gp`, `Age Category`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`, Measles, Obesity, Smoking, Malnutrition,Occupation,`Delay between onset and consultation`,`Length of stay in Hospital`,merge_admit,Pregnancy,HCW)
+
+
+## Severity data set receded (All age group classifications included to see if there is confounding for different strata) 
+data_linelist_reg_Soutcome<-data_linelist_reg %>% 
+  dplyr::select(Soutcome,sex,`Age group`,`Age china`, `Age 7gp`,`Age Category`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`,`Length of stay in Hospital`)
+
+## treatment outcome data set (only admitted patients)
+data_linelist_reg_toutcome<-data_linelist_reg %>% 
+  dplyr::select(toutcome, sex,`Age group`, `Age Category`,`Age china`, `Age 7gp`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`, Measles, Obesity, Smoking, Malnutrition,Occupation,`Delay between onset and consultation`,`Length of stay in Hospital`,Pregnancy,HCW)
+
+
+## Tabulate the missing values to see which once to remove to increase the number of observations included. However this will cause a bias as you are fitted the data to the model instead of the model to the data. the better approch will be to remove variables based on the cut point of the missing values.
+
+ #data_linelist_reg[complete.cases(data_linelist_reg),]
+   #data_linelist_reg_Soutcome[complete.cases(data_linelist_reg_Soutcome),]
+    #data_linelist_reg_toutcome[complete.cases(data_linelist_reg_toutcome),]
+
+## Count the missing values in the variables of interest
+#sapply(data_linelist_reg,function(x) sum(is.na(x)))
+#contrasts(factor(data_linelist_reg$`Length of stay in Hospital`))
+#contrasts(factor(data_linelist_reg$Obesity))
+
+## check the structure of the data
+      #str(data_linelist_reg_toutcome)
+      #str(data_linelist_reg_toutcome)
+```
+
+
+```{r missing values explore for inclusion of variables in to the model}
+## plot missing values
+#library(naniar)
+#gg_miss_var(data_linelist_reg_toutcome, show_pct = TRUE)
+
+##gg_miss_var(data_linelist_reg_toutcome, show_pct = TRUE,facet = Continent)
+
+##gg_miss_var(data_linelist_reg_toutcome, show_pct = TRUE,facet = Country)
+
+
+##vis_miss(data_linelist_reg_toutcome,warn_large_data = FALSE)
+
+# Variables with more than 75% missing value will be excluded form the model  
+```
+
+
+```{r packages for regression}
+## we have many packages to run regression analysis
+library(lessR)
+#library(olsrr) for linear regression for lm
+library(ResourceSelection)
+library(leaps)
+library(dummies)
+library(MASS)
+library(pROC)
+library(bootStepAIC)
+library(mlbench)
+library(car)
+library(caret)
+library(InformationValue)
+library(rJava)
+library(glmulti)
+library(bestglm)
+```
+
+# Regression analysis 
+## Risk factors for diseases severity
+
+### Unvariate univariate analysis 
+
+uni variate analysis was conducted among the risk factors ad diseases severity classified as severe as an event and mild cases as non event. in the uni variate analysis, factors Age category, Continent, fever, cough, breathlessness, Sore throat, chills, headache, abdominal pain, Aches, tiredness, runny nose, vomiting, Cardiac diseases, hypertension, renal and liver diseases, HIV, tuberculosis, malnutrition and measles were all significantly associated with severe disease outcome (Table).   
+
+```{r univariate analysis based on severity reclasified from MSF_severity}
+## Uni-variate regression all variables fitted
+
+model1<-data_linelist_reg %>%
+ dplyr::select(Soutcome,sex, `Age 7gp`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+
+## variables with more than 75% missing values are excluded from the analysis
+MSF_severityreg<-data_linelist_reg %>%
+ dplyr::select(Soutcome, sex, `Age 7gp`,  Fever,Cough, Breathlessness, `Sore throat`,`Headache`, Aches,`Loss of taste`,  Anosmia, `Cardiac diseases`, Hypertension, Obesity, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, `Other immune deficiency diseases`,`Other chronic lung diseases`, `Delay between onset and consultation`) 
+
+
+  
+severity_uvreg<-
+   model1 %>% 
+   tbl_uvregression(
+    method = glm,
+    y = Soutcome,
+    method.args = list(family = binomial),
+    exponentiate = TRUE) %>%
+   add_n() %>% 
+   add_nevent() %>% 
+  bold_p(0.25) %>% 
+  modify_header(label="**Varibles passed**",estimate="**COR**", stat_nevent="**Severe Cases**" ) %>% 
+  modify_caption("Univariate regression analysis of dependent variables against diseases severity (severity as mild and severe)")  
+  theme_gtsummary_compact()
+  theme_gtsummary_journal(journal = "jama", set_theme = TRUE)
+
+  severity_uvreg
+  
+#severity_uvreg<-severity_uvreg %>% 
+  #as_gt()
+#gtsave(severity_uvreg,
+       #file.path(path.local, paste0('MSF_severity uvreg table', '.png'))) %>%
+  #invisible() 
+
+#str(MSF_severityreg) # to see which variable is giving contrast error or level error
+```
+
+### Strtified univariate analysis (Age stratas)
+Due to small number of observations with complete observations, some of the age strata doesn't have enough observations. Hence, the stratified uni variate regression analysis of diseases severity by age group is not conducted 
+
+```{r stratified univariate analysis of diseases severity}
+
+
+
+
+
+```
+
+
+
+```{r logistics regression disease severity as dependent recategorized from msf severity}
+## All variables with P values of <0.25 and the minimum values > 0 in the factor values  are included
+MSF_severityreg_stepwise<-data_linelist_reg %>%
+  dplyr::select(Soutcome,sex, `Age 7gp`,  Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Runny nose`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension,   Diabetes, `Neurological diseases`, `Other chronic lung diseases`,Smoking, `Delay between onset and consultation`,`Liver diseases`, `Renal diseases`,Pregnancy, HCW) 
+
+# Remove all missing values 
+MSF_severityreg_stepwise<-na.omit(MSF_severityreg_stepwise)
+
+ #fit model (full model)
+     #logit_a<-glm(Soutcome~.,family=binomial,data=MSF_severityreg_stepwise)
+     #summary(logit_a)
+
+# check the variable which is causing contrast error due to no observation in on of the categories and remove them
+     #summary(MSF_severityreg_stepwise) # remove variables with 0 values and very small values to increase the sample size in one of the categories 
+ 
+## model fitted with stepAIC default(it considers both backward and forward selection). To specify the direction.direction="" argument is needed. Trace can be also included to 
+      ## stepAIC function to fit glm
+ #logit_b<-stepAIC(logit_a,direction="backward", trace=FALSE)
+   #summary(logit_b)
+   
+## Step AIC final model
+   
+   #full_model<-glm(Soutcome~.,family=binomial,data=MSF_severityreg_stepwise)
+    #summary(full_model)
+   
+  stepAIC_model<-glm(Soutcome ~ Cough + Breathlessness + `Sore throat` + 
+    Headache + Tiredness + Anosmia + Diabetes + 
+    Smoking + `Delay between onset and consultation`, family = binomial, 
+    data = MSF_severityreg_stepwise)
+  
+## summary(stepAIC_model)
+
+  final_model<-stepAIC_model %>% 
+  tbl_regression(exponentiate=TRUE) %>% 
+  add_n() %>% 
+  add_nevent() %>% 
+  bold_p(t=.05) 
+    
+# final_model
+
+```
+
+### Multivariate analysis of factors for diseases severity
+
+```{r final model}
+MSF_SEVERITY<-MSF_severityreg_stepwise %>% 
+dplyr::select(Soutcome, sex ,`Age 7gp` , Fever , Cough , Breathlessness  , Chills , Tiredness , `Runny nose`,`Loss of taste` , `Chest pain` , Headache , `Cardiac diseases` , Diabetes ,  `Sore throat`,`Delay between onset and consultation` ,  Hypertension )
+
+## final fit after model fitness check and non predicting variables are removed (Manual)
+MSF_seve_logR_model<-glm(Soutcome ~.,data=MSF_SEVERITY, family=binomial)
+
+ #summary(MSF_seve_logR_model)
+## hoslem.test(MSF_seve_logR_model$y, fitted(MSF_seve_logR_model), g=20)
+## xtabs(~Smoking + Soutcome, data=data_linelist_reg)
+MSF_sev_logR_model<-MSF_seve_logR_model %>% 
+  tbl_regression(exponentiate=TRUE) %>% 
+  add_n() %>% 
+  add_nevent() %>% 
+  bold_p(t=.05) %>% 
+  modify_header(label="**Varibles passed**",estimate="**AOR**", stat_nevent="**Severe \nCases**" ) %>% 
+  modify_caption("Multivariate logistic regression analysis of dependent variables against diseases severity (severity as mild and severe)") %>% 
+modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  theme_gtsummary_compact()
+theme_gtsummary_journal(journal = "jama", set_theme = T)
+
+MSF_sev_logR_model
+
+
+#MSF_sev_logR_model<-MSF_sev_logR_model %>% 
+  #as_gt()
+
+#gtsave(MSF_sev_logR_model,
+       #file.path(path.local, paste0('MSF_severity uvreg table', '.png'))) %>%
+  #invisible() 
+
+```
+
+# forest plot
+
+```{r plot sevrity}
+library(finalfit)
+#Mutate all the variables of interest in to single word as Or_plot can not read ``
+MSF_severityreg_stepwise<-MSF_severityreg_stepwise %>% 
+  mutate(Age=`Age 7gp`,
+         Ageusia=`Loss of taste`,
+         Cardiacdiseases=`Cardiac diseases`,
+         Neurologicaldiseases=`Neurological diseases`,
+         delayinadmission=`Delay between onset and consultation`,
+         Otherlung=`Other chronic lung diseases`,
+         Runnynose=`Runny nose`,
+         Chestpain=`Chest pain`,
+         Sorethroat=`Sore throat`,
+         Severity=Soutcome)
+# OR plot
+
+data(MSF_severityreg_stepwise)
+explanatory = c('sex','Age','Fever' , 'Cough' ,'Chills','Runnynose','Headache','Chestpain','Tiredness','Sorethroat', 'Breathlessness','Ageusia','Diabetes','Hypertension','Cardiacdiseases','Liverdiseases','Renaldiseases','Neurologicaldiseases','delayinadmission','Otherlung' )
+dependent = "Severity"
+
+MSF_severityreg_stepwise %>%
+  or_plot(dependent, explanatory,
+       table_text_size=3,
+       title_text_size=10,
+       plot_opts=list(xlab("OR, 95% CI"), 
+       theme(axis.title = element_text(size=10))))
+```
+
+## Factors for outcome of patients.
+
+Treatment outcome analysis was sought among patients, which were confirmed and admitted between January 2020-December 2021 and have a known outcome. There were 15,180 patients confirmed admitted and The total number of admitted patients with known outcome were 9326 (61%) cases.   
+
+### Univariate and multivariate analysis of treatmment outcome 
+
+Uni variate analysis was conducted for variables known by literature and for gray resources. variables sex, Age group, Fever,Cough, Breathlessness, Sore throat, Chills,Headache,Abdominal pain, Aches, Tiredness, Nasal congestion,Runny nose, Diarrhea,Vomiting,Loss of taste,  Anosmia, Chest pain,Cardiac diseases, Hypertension, Liver diseases, Renal diseases, Diabetes, Neurological diseases, Malignancy, Malaria, HIV, Other immune deficiency diseases,Tuberculosis,Other chronic lung diseases, Measles, Smoking, Malnutrition,Occupation, Delay between onset and consultation,Length of stay in Hospital,Obesity and Cutaneous signs has shown significant relation to the treatment outcome in the uni variable analysis.  
+
+```{r univariate regression analysis of treatment outcome by dependent variables}
+
+## Uni-variate regression
+rx_outcome_uvreg_model<-data_linelist_reg_toutcome %>%
+  dplyr::select(toutcome, sex, `Age 7gp`, Fever,Cough, Breathlessness, `Sore throat`, `Headache`, Aches,`Loss of taste`,  Anosmia,  `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, `Other immune deficiency diseases`,`Other chronic lung diseases`,Measles, Malnutrition,Pregnancy, `Delay between onset and consultation`,`Length of stay in Hospital`,HCW)
+  
+ rx_outcome_uvreg_model<-
+   rx_outcome_uvreg_model %>% 
+    tbl_uvregression(
+    method = glm,
+    y = toutcome,
+    method.args = list(family = binomial),
+    exponentiate = TRUE) %>%
+   add_n() %>% 
+   add_nevent() %>% 
+  bold_p(0.25) %>% 
+   modify_header(label="**Varibles passed**",estimate="**COR**", stat_nevent="**Deaths**" ) %>% 
+  modify_caption("Univariate regression analysis of independent variables against treatment outcome (died and survived) of admitted patient") %>% 
+modify_footnote(all_stat_cols()~"This data referes to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  theme_gtsummary_compact()
+  theme_gtsummary_journal(journal = "jama", set_theme = TRUE)
+
+ rx_outcome_uvreg_model
+  
+```
+
+### Univariate analasys of diseases Outcome stratified by age group
+
+The number of observations for some of the age staratas are not enough to run stratified regression analysis, in addition to the difference in the number of observations in the different stratas. Hence, stratified uni variate regression analyses of disease out come versus the different age strata's is not considered.  
+
+ 
+```{r stratified univariate analysis for treatment outcome}
+
+
+
+```
+
+### Multivariate analysis of fcators affecting treatment outcome
+
+variables with p values of <0.25 in the uni variate regression analysis are passed to the binary logistic regression. Model was fitted including the variables which are relevant from literature but insignificant in the uni-variate analysis.
+
+
+
+ 
+```{r logistics regression treatment outcome as dependent}
+## initial model
+toutcome_vars<-data_linelist_reg_toutcome %>% 
+  dplyr::select(toutcome, sex, `Age 7gp`, Fever,Cough, Breathlessness, `Headache`, `Loss of taste`,  Anosmia,  `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy,Pregnancy,HCW, `Other chronic lung diseases`, Malaria, HIV,  `Delay between onset and consultation`,`Length of stay in Hospital`)
+
+toutcome_vars<-na.omit(toutcome_vars)
+# fit model (full model)
+#logit_1<-glm(toutcome~.,family=binomial,data=toutcome_vars)
+## model fitted with stepAIC default(it considers both backward and forward selection). To specify the direction.direction="" argument is needed. Trace can be also included to 
+      ## stepAIC function to fit glm
+ #logit_2<-stepAIC(logit_1,direction ='forward', trace=TRUE)
+       #summary(logit_2)
+## variables selcetd through stepAIC and variables important by literature are added.
+```
+
+
+```{r fit after AIC}
+  
+#qrr<-glm(toutcome~sex + `Age 7gp` + Fever + Cough + Breathlessness + 
+    #Headache + `Loss of taste` + Anosmia + `Cardiac diseases` + 
+    #Hypertension + `Liver diseases` + `Renal diseases` + Diabetes + 
+    #`Neurological diseases` + Malignancy + Pregnancy + HCW + 
+    #`Other chronic lung diseases` + Malaria + HIV + `Delay between onset and consultation` + 
+    #`Length of stay in Hospital`,family=binomial, data = toutcome_vars)
+#summary(qrr)
+  
+## fit model with forward direction variable selection
+ ##logit_3<-stepAIC(logit_1, direction="forward",trace =T)
+  ##summary(logit_3)
+## fit model with forward direction ariable selection
+ #logit_4<-stepAIC(logit_1, direction="backward", trace=F)
+  #summary(logit_4)
+#rx_outcome_logRR<-qrr %>% 
+  #tbl_regression(exponentiate=TRUE) %>% 
+  #add_n() %>% 
+  #add_nevent() %>% 
+  #bold_p(t=.05) %>% 
+  #add_vif() %>% 
+  #modify_caption("Binary logistic regression analysis of independent variables against treatment outcome with adjusted odds ratio  and 95% CI") %>% 
+#modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  #theme_gtsummary_compact()
+#theme_gtsummary_journal(journal = "jama", set_theme = T)
+
+#rx_outcome_logRR
+
+```
+
+
+```{r final manual model}
+  #################################################################################################################
+## Important variables by literature  are added to the final model
+##### the below was done manually
+## Logistics regression
+rx_outcome<-data_linelist_reg_toutcome %>% 
+  dplyr::select(toutcome, sex , `Age 7gp` , Fever , Cough , Breathlessness , `Loss of taste` , `Cardiac diseases`, Hypertension , `Liver diseases`, `Renal diseases` ,  Diabetes ,`Neurological diseases`,`Other chronic lung diseases`,Pregnancy,HCW, `Delay between onset and consultation` , `Length of stay in Hospital`)
+rx_outcome<-na.omit(rx_outcome) 
+  
+rx_outcome_model<-glm(toutcome~.,data=rx_outcome, family=binomial)
+summary(rx_outcome_model)
+    
+rx_outcome_logRR<-rx_outcome_model %>% 
+  tbl_regression(exponentiate=TRUE) %>% 
+  add_n() %>% 
+  add_nevent() %>% 
+  bold_p(t=.05) %>% 
+  modify_header(label="**Varibles passed**",estimate="**AOR**", stat_nevent="**Deaths**" ) %>% 
+  #add_vif() %>% 
+  modify_caption("Multivariate logistic regression analysis of independent variables against treatment outcome (Died and survived)") %>% 
+modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  theme_gtsummary_compact()
+theme_gtsummary_journal(journal = "jama", set_theme = T)
+rx_outcome_logRR
+
+## check for #Confounding # effect modification # multi-coliniarity 
+## effect modification
+#check the problem with contrast error
+     #xtabs(~toutcome +Pregnancy, data=rx_outcome)
+
+```
+
+In the multivariate analysis, variable which has significant association with poor patient outcome were sex male
+`r inline_text(rx_outcome_logRR, variable = sex,level='Male', pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")`, age group 70-29 years old `r inline_text(rx_outcome_logRR, variable = 'Age 7gp',level='70-79 yrs', pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")` and 80 years and older `r inline_text(rx_outcome_logRR, variable = 'Age 7gp',level='80+ yrs',  pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")`, Fever `r inline_text(rx_outcome_logRR, variable = Fever, pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")`, cough `r inline_text(rx_outcome_logRR, variable = Cough, pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")`, Ageusia `r inline_text(rx_outcome_logRR, variable = 'Loss of taste', pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")` and  Renal diseases `r inline_text(rx_outcome_logRR, variable = 'Renal diseases', pattern = "(OR {estimate}; 95% CI {conf.low}, {conf.high}; {p.value})")` were factors significantly associated with poor outcome(death). 
+
+# forest plot
+```{r plot odds ratio}
+library(finalfit)
+#Mutate all the variables of interest in to single word as Or_plot can not read ``
+rx_outcome<-rx_outcome %>% 
+  mutate(Age=`Age 7gp`,
+         Ageusia=`Loss of taste`,
+         Cardiacdiseases=`Cardiac diseases`,
+         Liverdiseases=`Liver diseases`,
+         Renaldiseases=`Renal diseases`,
+         Neurologicaldiseases=`Neurological diseases`,
+         Admissionlength=`Length of stay in Hospital`,
+         delayinadmission=`Delay between onset and consultation`,
+         otherlung=`Other chronic lung diseases`,
+         Outcome=toutcome)
+
+# OR plot
+
+data(rx_outcome)
+explanatory = c('sex','Age','Fever' , 'Cough' ,'Hypertension', 'Breathlessness','Ageusia','Diabetes','Cardiacdiseases','Liverdiseases','Renaldiseases','Neurologicaldiseases','Admissionlength','delayinadmission','otherlung','Pregnancy', 'HCW' )
+dependent = "Outcome"
+
+rx_outcome %>%
+  or_plot(dependent, explanatory,
+       table_text_size=4,
+       title_text_size=10,
+       plot_opts=list(xlab("OR, 95% CI"), 
+       theme(axis.title = element_text(size=10))))
+```
+
+\newpage
+
+
+# Annexes 
+
+```{r dseverity regression model, severity categorized based on admission}
+## current analysis only among admitted patients and admission can not be used as a class for severity
+data_linelist_reg_ssoutcome<-data_linelist_reg %>% 
+  dplyr::select(ssoutcome, sex, `Age Category`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+ #Uni-variate regression
+Admseverityreg<-data_linelist_reg_ssoutcome %>%
+  dplyr::select(ssoutcome, sex, `Age Category`, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+
+
+ Admseverity_uvreg<-
+   Admseverityreg %>% 
+    tbl_uvregression(
+    method = glm,
+    y = ssoutcome,
+    method.args = list(family = binomial),
+    exponentiate = TRUE) %>%
+   add_n() %>% 
+   add_nevent() %>% 
+  bold_p(t=0.25) %>% 
+modify_caption("Univariate regression analysis of dependent variables against diseases severity (severity as mild and severe)") %>% 
+modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  theme_gtsummary_compact()
+  theme_gtsummary_journal(journal = "jama", set_theme = TRUE)
+
+  Admseverity_uvreg
+  
+#Admseverity_uvreg<-Admseverity_uvreg %>% 
+  #as_gt()
+#gtsave(Admseverity_uvreg,
+       #file.path(path.local, paste0('Adm_severity uvreg table', '.png'))) %>%
+  #invisible() 
+## check the variable levels to avoid contarst error
+  summary(Admseverityreg)
+```
+
+# Startified univariate analysis of diseases severity 
+This becomes very difficult due to the missing values are not the same for the different strata.
+ 
+
+```{r stratified univariate analysis}
+## filter the data by the strata group
+## conduct the uni variate analysis for each filter
+## use the tbl_merge function form gt summary
+#Admseverityuvreg_strata1<-Admseverityreg %>% 
+ # mutate(age=`Age Category`) %>% 
+    #filter(age=="0-14 yrs")
+#Admseverityuvreg_strata2<-Admseverityreg %>% 
+  #filter(`Age Category`=="15-34 yrs")
+#Admseverityuvreg_strata3<-Admseverityreg %>% 
+  #filter(`Age Category`=="35-49 yrs")
+#Admseverityuvreg_strata4<-Admseverityreg %>% 
+  #filter(`Age Category`=="50-64 yrs")
+#Admseverityuvreg_strata5<-Admseverityreg %>% 
+  #filter(`Age Category`=="65-79 yrs")
+#Admseverityuvreg_strata6<-Admseverityreg %>% 
+  #filter(`Age Category`=="80+ yrs")
+```
+
+
+```{r age strata 1}
+
+#strata_1<-Admseverityuvreg_strata1 %>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+
+#Admseverity_uvreg_stara_1<-
+  #strata_1 %>% 
+    #tbl_uvregression(
+    #method = glm,
+    #y = ssoutcome,
+    #method.args = list(family = binomial),
+    #exponentiate = TRUE) %>%
+   #add_n() %>% 
+   #add_nevent() %>% 
+  #bold_p(t=0.25) %>% 
+  #modify_caption("Univariate regression analysis of dependent variables against diseases severity (severity as mild and severe)") %>% 
+#modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+ # theme_gtsummary_compact()
+ # theme_gtsummary_journal(journal = "jama", set_theme = TRUE)
+
+  #Admseverity_uvreg_stara_1
+  
+#Admseverity_uvreg<-Admseverity_uvreg %>% 
+  #as_gt()
+#gtsave(Admseverity_uvreg,
+       #file.path(path.local, paste0('Adm_severity uvreg table', '.png'))) %>%
+  #invisible() 
+
+```
+
+
+```{r age strata 2}
+#strata_2<-Admseverityuvreg_strata2 %>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+
+ #Admseverity_uvreg_strata_2<-
+ #strat_2 %>% 
+    #tbl_uvregression(
+    #method = glm,
+    #y = ssoutcome,
+    #method.args = list(family = binomial),
+    #exponentiate = TRUE) %>%
+   #add_n() %>% 
+   #add_nevent() %>% 
+  #bold_p(t=0.25) %>% 
+  #modify_caption("Univariate regression analysis of dependent variables against diseases severity (severity as mild and severe)") %>% 
+#modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+ # theme_gtsummary_compact()
+ # theme_gtsummary_journal(journal = "jama", set_theme = TRUE)
+
+  #Admseverity_uvreg_strata_2
+  
+#Admseverity_uvreg<-Admseverity_uvreg %>% 
+  #as_gt()
+#gtsave(Admseverity_uvreg,
+       #file.path(path.local, paste0('Adm_severity uvreg table', '.png'))) %>%
+  #invisible() 
+```
+ 
+  
+```{r starat 3}  
+#######
+#strata_3<-Admseverityuvreg_strata3 %>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+```
+
+
+```{r age starta 4}
+################
+#strata_4<-Admseverityuvreg_strata4 %>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+```
+
+```{r age strata 5}
+#######
+#strata_5<-Admseverityuvreg_strata5%>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+```
+
+
+```{r age strata 6}
+#strata_6<-Admseverityuvreg_strata6 %>%
+  #dplyr::select(ssoutcome, sex, Continent, Fever,Cough, Breathlessness, `Sore throat`, Chills,`Headache`,`Abdominal pain`, Aches, Tiredness, `Nasal congestion`,`Runny nose`,`Diarrhoea`,Vomiting,`Loss of taste`,  Anosmia,  `Chest pain`, `Cutaneous signs`, `Cardiac diseases`, Hypertension, `Liver diseases`, `Renal diseases`, Diabetes, `Neurological diseases`, Malignancy, Malaria, HIV, `Other immune deficiency diseases`, Tuberculosis,`Other chronic lung diseases`,Measles,Obesity,Smoking, Malnutrition,Occupation,`Delay between onset and consultation`)
+```
+
+```{r tbl_merge of startified univariate analysis}
+########merge the gtsummary tables after running the strtified regression
+
+```
+
+
+## Severity based on admission of all confirmed cases(in/outpatients)
+
+
+
+
+
+
+
+```{r logistics regression disease severity as dependent variable}
+## Manually fitted model (Many variables are removed based on the amount of missing values)
+
+Adm_seve_model<-glm(ssoutcome~sex + `Age group`+ Fever + Cough + `Sore throat`+ Breathlessness +   Tiredness + Chills + `Nasal congestion` +   `Runny nose` + `Loss of taste` + Anosmia +   Vomiting + Headache +`Liver diseases`+`Renal diseases` + `Cardiac diseases`+ Diabetes +`Neurological diseases` +  `Delay between onset and consultation`+  Hypertension +  Diarrhoea + Malaria + Tuberculosis + HIV+ Malnutrition ,
+                                   data=data_linelist_reg_ssoutcome,
+                                    family=binomial)
+######################################################################################################
+## prepare data for step wise variable selection
+
+data<-data_linelist_reg %>% 
+ dplyr::select(Soutcome, sex , `Age Category`, Fever , Cough , `Sore throat` ,  Breathlessness ,   Tiredness , Chills , `Nasal congestion` ,   `Runny nose` , `Loss of taste` , Anosmia ,   Vomiting , Headache ,`Liver diseases`,`Renal diseases` , `Cardiac diseases`, Diabetes ,`Neurological diseases` ,  `Delay between onset and consultation`,  Hypertension ,  Diarrhoea , Malaria , Tuberculosis , HIV, Malnutrition)
+
+# omit missing values
+newdata<-na.omit(data)
+
+## fit model (full model)
+logit_1<-glm(ssoutcome~.,family=binomial,data=newdata)
+        #summary(logit_1)
+## model fitted with stepAIC default(it considers both backward and forward selection). To specify the direction.direction="" argument is needed. Trace can be also included to 
+      ## stepAIC function to fit glm
+ logit_2<-stepAIC(logit_1,trace=FALSE)
+       summary(logit_2)
+## fit model with forward direction ariable selection
+ #logit_3<-stepAIC(logit_1, direction="forward",trace =T)
+  #summary(logit_3)
+## fit model with forward direction variable selection
+ #logit_4<-stepAIC(logit_1, direction="backward", trace=F)
+   #summary(logit_4)
+## cafeterias used for the variable selection (AIC, BIC,...) the default is AIC
+  #BIC<-stepAIC(logit_1,k=log(nrow(Soutcome))) #BIC method
+  #summary(BIC)
+## to specify the range of variables to include (Lower model atleast to include variables that we need, and the upper model is the largest possible method)
+ # scope<-stepAIC(logit_1,scope=list(lower=~sex +`Cardiac diseases`,upper=logit_1),trace=FALSE) ## means we can not exclude sex and age to the minimum while the maximum coould be the full model
+  #summary(scope)
+  
+######################################################################################################  
+##--------------------------BEST SUBSET LOGISTIC REGRESSION-------------------------------------### 
+## best subset regression uses the bestglm() function. for bestglm() to work:
+    #1) The response variable needs to be in the last column if the family is set to "binomial"
+         #Soutcome.move<-Soutcome[,-1]
+         #Soutcome
+    #2) The IC argument specifies the criteria to use (“AIC”, “BIC”,“BICg”, “BICq”, “LOOCV” and “CV”)
+    #3) Factors with more than two levels need to be converted to dummy tables(levels other than the reference) 
+       #Delay.cat<-data.frame(dummy(newdata$`Delay between onset and consultation`)[,c(2,3,4)])
+       #Delay.cat
+       #Malaria.cat<-data.frame(dummy(newdata$Malaria)[,c(2,3,4)])
+       #Malaria.cat
+       #Tuberculosis <-data.frame(dummy(newdata$Tuberculosis)[,c(2,3)])
+       #Tuberculosis.cat
+       #HIV.cat<-data.frame(dummy(newdata$HIV)[,c(2,3,4)])
+       #HIV.cat
+       #Age.cat<-data.frame(dummy(newdata$`Age Category`) [,c(2,3,4,5,6)])
+    #4) Fit model
+      #bestglm(data.dummy,IC="BIC",family=binomial)
+      #bestglm(data.dummy,IC="AIC",family=binomial) ## AIC approach keeps more variables
+      
+###############################ORRRRRR#####################################################
+##-------------------------------------####------------------------------------------------###   
+
+#newdata.for.best.logistic <- within(newdata, {
+    #y <- Soutcome         # Soutcome into y
+    #Soutcome<- NULL       # Delete Soutcome
+#})
+
+## Reorder variables
+      
+#newdata.for.best.logistic <-
+    #newdata.for.best.logistic[, c("sex" , "Age Category", "Fever" , "Cough" , "Sore throat" ,  "Breathlessness" ,   "Tiredness" , "Chills" , "Nasal congestion" ,   "Runny nose" , "Loss of taste" , "Anosmia" ,"Vomiting" , "Headache" ,"Liver diseases","Renal diseases" , "Cardiac diseases", "Diabetes", "Neurological diseases","Delay between onset and consultation",  "Hypertension" ,  "Diarrhoea" , "Malaria" , "Tuberculosis" , "HIV", "Malnutrition","y")]
+
+## Perform
+#res.best.logistic <-
+    #bestglm(newdata.for.best.logistic,
+            #family = binomial,                # binomial family for logistic
+            #IC = "AIC",                       # Information criteria for
+            #method = "exhaustive")
+ #################################################################################################     
+##---------------------glmulti variable selection methods---------------##
+## Order the variables
+#glmulti.logistic.out <-
+    #glmulti(Soutcome ~ sex + `Age Category`+ Fever + Cough+ `Sore throat`+ Breathlessness +   Tiredness + Chills + `Nasal congestion` +   `Runny nose` + `Loss of taste` + Anosmia +   Vomiting + Headache +`Liver diseases`+`Renal diseases` + `Cardiac diseases`+ Diabetes +`Neurological diseases` + `Delay between onset and consultation`+  Hypertension +  Diarrhoea + Malaria + Tuberculosis + HIV+  Malnutrition, data=newdata ,
+            #level = 1,               # No interaction considered
+            #method = "h",            # Exhaustive approach
+            #crit = "aic",            # AIC as criteria
+            #confsetsize = 5,         # Keep 5 best models
+            #plotty = F, report = F,  # No plot or interim reports
+            #fitfunction = "glm",     # glm function
+            #family = binomial)       # binomial family for logistic regression
+
+## Show 5 best models (Use @ instead of $ for an S4 object)
+#glmulti.logistic.out@formulas
+## Show result for the best model
+#summary(glmulti.logistic.out@objects[[1]])
+################################################################################################
+##----------------------------------------------------------------------------------------------
+## below model fitted using stepAIC function (Final model)
+
+Adm_seve_model<-glm(ssoutcome ~ sex + `Age Category` + Fever + Breathlessness + 
+    Tiredness + Vomiting + `Liver diseases` + `Renal diseases` + 
+    `Cardiac diseases` + Malaria, family = binomial, data = newdata)
+
+## Hosmer and lemshow test
+ #hoslem.test(Adm_seve_model$y, fitted(Adm_seve_model), g=20)
+
+ ## confusion matrix and model accuracy
+         #summary(logit_2$fitted.values)
+ 
+ ## classify the prediction
+  #newdata$predict<-ifelse(logit_2$fitted.values>0.5, "pos","neg")
+ ## Confusion matrix
+#mytable <- table(newdata$ssoutcome,newdata$predict)
+#rownames(mytable) <- c("Obs. neg","Obs. pos")
+#colnames(mytable) <- c("Pred. neg","Pred. pos")
+#mytable
+
+## efficeincy ()
+#eff<-sum(diag(mytable))/sum(mytable)
+ ## ROC curve (The higher the area under the ROC curve the better the model is)
+#roc(ssoutcome~logit_2$fitted.values, data = newdata, plot = TRUE, main = "ROC CURVE", col= "blue") 
+ ## Auc =1 is perfect predictive modl
+#auc(ssoutcome~logit_2$fitted.values, data = newdata)
+## variables of importance
+#pscl::pR2(Adm_seve_model)["McFadden"]
+## calculate variable of importnace
+#caret::varImp(Adm_seve_model)
+#calculate sensitivity
+#predicted<-predict(Adm_seve_model,newdata,type="response")
+## Optimal cutoff
+#newdata$ssoutcome <-ifelse(newdata$ssoutcome=="Yes", 1, 0)
+#find optimal cutoff probability to use to maximize accuracy
+#optimal <- optimalCutoff(newdata$ssoutcome, predicted)[1]
+#calculate sensitivity (True positive rate )
+#sensitivity(newdata$ssoutcome, predicted)
+
+#calculate specificity (True negative rate)
+#specificity(newdata$ssoutcome, predicted)
+
+#calculate total misclassification error rate (Percentage of total incorrect classifications)
+#misClassError(newdata$ssoutcome, predicted, threshold=optimal)
+
+
+Adm_seve_logR<-Adm_seve_model %>% 
+  tbl_regression(exponentiate=TRUE,
+                 family=binomial
+                ) %>%
+  add_nevent() %>% 
+  add_n() %>% 
+  bold_p(t=.05) %>% 
+  add_vif() %>% 
+  modify_caption("Multivariate logistic regression analysis of dependent variables against diseases severity (severity as mild and severe based on admitted and not admitted)") %>% 
+modify_footnote(all_stat_cols()~"This data refers to Covid-19 cases treated in MSF supported facilities between jan 2020 to Dec 2021") 
+  theme_gtsummary_compact()
+theme_gtsummary_journal(journal = "jama", set_theme = T)
+
+Adm_seve_logR
+
+#Adm_seve_logR<-Adm_seve_logR %>% 
+  #as_gt()
+
+#gtsave(Adm_seve_logR,
+       #file.path(path.local, paste0('Adm_severity logR table', '.png'))) %>%
+ # invisible()  
+
+#summary(Adm_seve_model)
+
+```
+
+
